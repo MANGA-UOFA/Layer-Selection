@@ -77,8 +77,10 @@
 Make sure you are in the respective directories: `dart` for Data to Text or `t5mt` for Machine Translation.
 
 1. Download dataset:
-    - DART: [a google drive link that will be revealed once anonymity is lifted](a_link)
-    - WMT16 En--Ro: [a google drive link that will be revealed once anonymity is lifted](a_link)
+    - DART:
+       - Train/val: [https://drive.google.com/file/d/10Gi-Exu5tL4AbgQNzepWEeCv6fqna90p/view?usp=sharing](https://drive.google.com/file/d/10Gi-Exu5tL4AbgQNzepWEeCv6fqna90p/view?usp=sharing)
+       - Evaluate: [https://drive.google.com/file/d/1e-hsz5ml9A0o7SjRP33zXs5sGhJcDB0L/view?usp=sharing](https://drive.google.com/file/d/1e-hsz5ml9A0o7SjRP33zXs5sGhJcDB0L/view?usp=sharing)
+    - WMT16 En--Ro: [https://drive.google.com/file/d/1e-hsz5ml9A0o7SjRP33zXs5sGhJcDB0L/view?usp=sharing]([a_link](https://drive.google.com/file/d/1e-hsz5ml9A0o7SjRP33zXs5sGhJcDB0L/view?usp=sharing)
 
     Before any training, you should also consider making a `runs` and `models` directory to contain experiments and hold onto models.
 

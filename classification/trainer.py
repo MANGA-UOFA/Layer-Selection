@@ -1836,9 +1836,8 @@ from copy import deepcopy
 from transformers import (
     AutoModelForSequenceClassification, 
     BertConfig,
-    BertForSequenceClassification, 
-    BertPreTrainedModel,  
 )
+from modeling_bert import BertForSequenceClassification, BertPreTrainedModel
 
 # student number of layers to teacher layer indices
 LAYER_MAP = {
@@ -1866,6 +1865,7 @@ class DistillBertTrainer(Trainer):
         self.alpha_mle = kwargs["args"].alpha_mle 
         self.alpha_kl = kwargs["args"].alpha_kl
         self.alpha_hidden = kwargs["args"].alpha_hidden 
+        self.alpha_dv = kwargs["args"].alpha_dv
 
         self.reverse = kwargs["args"].reverse
         self.random = kwargs["args"].random_matching
@@ -1896,6 +1896,12 @@ class DistillBertTrainer(Trainer):
             self.random_init_student = True
             self.model.adapters = [nn.Linear(self.dim, self.teacher.config.hidden_size, bias=False, device=self.args.device) for _ in range(self.model.config.num_hidden_layers + 1)]
             # self.optimizer.add_param_group(optimizer_grouped_parameters)
+
+        self.model.critic = nn.Sequential(
+            nn.Linear(self.model.config.hidden_size, self.model.config.hidden_size, bias=False), 
+            nn.ReLU(), 
+            nn.Linear(self.model.config.hidden_size, 1, bias=False)
+        ).to("cuda")
 
         print("======= STUDENT ARCHITECTURE ========")
         print(self.model)
@@ -1938,7 +1944,7 @@ class DistillBertTrainer(Trainer):
         else: 
             raise NotImplementedError()
     
-        student: PreTrainedModel = AutoModelForSequenceClassification.from_config(student_config)
+        student: PreTrainedModel = BertForSequenceClassification(student_config)
         if random_init: 
             return student
         # And then we copy the layers
@@ -1957,15 +1963,19 @@ class DistillBertTrainer(Trainer):
                             student_hidden: Tuple[torch.Tensor], 
                             layers_matched: List[int], 
                             match_embeddings: bool = True) -> Tuple[List[torch.Tensor]]: 
-        print("layer_matching", layers_matched)
-        if match_embeddings: 
-            t_hidden = [teacher_hidden[0]] + [teacher_hidden[i+1] for i in layers_matched]
-            s_hidden = [student_hidden[0]] + [student_hidden[i+1] for i in range(len(layers_matched))]
-        else: 
+        # print("layer_matching", layers_matched)
+        # if match_embeddings: 
+        #     t_hidden = [teacher_hidden[0]] + [teacher_hidden[i+1] for i in layers_matched]
+        #     s_hidden = [student_hidden[0]] + [student_hidden[i+1] for i in range(len(layers_matched))]
+        # else: 
 
-            t_hidden = [teacher_hidden[i+1] for i in layers_matched]
-            s_hidden = [student_hidden[i+1] for i in range(len(layers_matched))]
-            print("layers matched: ", [i+1 for i in layers_matched])
+        #     t_hidden = [teacher_hidden[i+1] for i in layers_matched]
+        #     s_hidden = [student_hidden[i+1] for i in range(len(layers_matched))]
+        #     print("layers matched: ", [i+1 for i in layers_matched])
+        
+        #OVERRIDE
+        return [teacher_hidden[-1]], [student_hidden[-1]]
+
 
         return t_hidden, s_hidden
 
@@ -2011,6 +2021,9 @@ class DistillBertTrainer(Trainer):
         """
         assert len(teacher_states) == len(student_states), "Number of teacher and student states do not match" 
 
+        A = self.model.A if self.model.A is not None else torch.eye(self.model.config.hidden_size)
+        student_states[-1] = (A @ student_states[-1][:, :, :, None])[:, :, :, 0]
+
         diffs = [((t - s) * (t - s)).sum(dim=-1) for t, s in zip(teacher_states, student_states)]
         valids = attention_mask.sum()
         # normalized by the number of valids
@@ -2039,7 +2052,34 @@ class DistillBertTrainer(Trainer):
         return loss
 
         
-    
+    def dv_loss(self, 
+        teacher_states: List[torch.Tensor], 
+        student_states: List[torch.Tensor], 
+        attention_mask: Optional[torch.Tensor] = None, 
+    ) -> torch.Tensor: 
+        
+        pos_critic_outputs = []
+        A = self.model.A if self.model.A is not None else torch.eye(self.model.config.hidden_size)[None, None, :, :]
+        student_states[-1] = (A @ student_states[-1][:, :, :, None])[:, :, :, 0]
+
+        for t, s in zip(teacher_states, student_states): 
+            cos = (t* s).sum(dim=-1) / (t.norm(dim=-1) * s.norm(dim=-1))
+            pos_critic_outputs.append(cos.view(-1)) 
+
+        neg_critic_outputs = []
+        shuffle_idx = torch.randperm(teacher_states[0].shape[0])
+        for t,s in zip(teacher_states, student_states): 
+            tn = t[shuffle_idx, :, :] 
+            cos = (tn* s).sum(dim=-1) / (t.norm(dim=-1) * s.norm(dim=-1))
+            neg_critic_outputs.append(cos.view(-1)) 
+
+        p = torch.cat(pos_critic_outputs) 
+        n = torch.cat(neg_critic_outputs) 
+
+        dv_loss = -(p.mean() - torch.log(n.exp().mean()))
+        return dv_loss
+
+
 
     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
         """
@@ -2143,9 +2183,20 @@ class DistillBertTrainer(Trainer):
 
         mle_loss = student_outputs.loss if self.compute_mle_loss else 0 
         
+        # new code
+        teacher_hidden, student_hidden = self.get_matching_states(
+            teacher_outputs.hidden_states, 
+            student_outputs.hidden_states, 
+            layers_matched=self.layer_matching
+        )
+        dv_loss = self.dv_loss(teacher_hidden, student_hidden) if self.alpha_dv > 0 else 0 
+
+
+
         loss =  (self.alpha_mle * mle_loss +  
                 self.alpha_kl * kl_loss + 
-                self.alpha_hidden * hidden_loss)
+                self.alpha_hidden * hidden_loss + 
+                self.alpha_dv * dv_loss)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
@@ -2160,7 +2211,8 @@ class DistillBertTrainer(Trainer):
         self.state.losses = [("loss", loss.item()),\
                              ("mle_loss", mle_loss.item() if isinstance(mle_loss, torch.Tensor) else mle_loss), \
                              ("kl_loss", kl_loss.item() if isinstance(kl_loss, torch.Tensor) else kl_loss), \
-                             ("hidden_loss", hidden_loss.item() if isinstance(hidden_loss, torch.Tensor) else hidden_loss)]
+                             ("hidden_loss", hidden_loss.item() if isinstance(hidden_loss, torch.Tensor) else hidden_loss), \
+                             ("dv_lower_bound", -dv_loss.item() if isinstance(dv_loss, torch.Tensor) else -dv_loss)]
 
         return (loss, student_outputs[:2]) if return_outputs else loss
 

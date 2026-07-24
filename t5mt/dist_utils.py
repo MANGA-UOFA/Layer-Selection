@@ -137,6 +137,58 @@ class MeanLayerDistance(Measure):
         return self
 
 
+class CosineFromStudent(Measure): 
+    def __init__(self, from_student_layer): 
+        self.from_student_layer = from_student_layer # deprecated, we now compute from all student layers
+        super().__init__() 
+    def compute(self, hidden_t, hidden_s): 
+        """
+        cos(T1-S1, Tk-S1)
+        hidden_t: torch.Tensor[batch, layers_t, seq_len, hidden]
+        hidden_s: torch.Tensor[batch, layers_s, seq_len, hidden]
+        """
+
+        layers_t = hidden_t.shape[1]
+        layers_s = hidden_s.shape[1]
+        seq_len = min(hidden_t.shape[2], hidden_s.shape[2]) 
+        dim = hidden_t.shape[-1]
+
+        assert hidden_s.shape[-1] == dim 
+        hidden_t_trunc = hidden_t[:, :, :seq_len]
+        hidden_s_trunc = hidden_s[:, :, :seq_len]
+
+        cos_sims = None
+        for j in range(1, layers_s):
+            hsj = hidden_s_trunc[:, j].reshape(-1, dim)
+            for i in range(1, layers_t):
+                hti = hidden_t_trunc[:, i].reshape(-1, dim)
+                for k in range(i+1, layers_t): 
+                    htk = hidden_t_trunc[:, k].reshape(-1, dim) # [batch x seqlen, dim]
+
+                    u = hti - hsj
+                    v = htk - hsj
+                    uv = (u * v).sum(dim=-1)
+                    uu = u.norm(dim=-1) 
+                    vv = v.norm(dim=-1)
+                    cosine = (uv / (uu * vv + 1e-6))
+                    cos_sims = cosine[None, ...] if cos_sims is None else torch.cat((cos_sims, cosine[None, ...]), dim=0) # [layer_combinations, batch x seqlen] 
+                   # print(cosine)
+        self.val = cos_sims.mean(dim=0)
+        return self
+    def accum(self): 
+        if self.counter == 0: 
+            self.mean = self.val.cpu() 
+        else: 
+            self.mean = torch.cat((self.mean, self.val.cpu()), dim=0)
+        self.counter += 1
+    def get_mean(self):
+
+        return self.mean.tolist()
+
+
+
+
+
 def compute_pca(states:List[torch.Tensor]) -> torch.Tensor: 
     """
     states: List[torch.Tensor[num_samples, hidden dimension]]

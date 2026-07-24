@@ -61,6 +61,7 @@ task_to_keys = {
 }
 
 from trainer import Trainer
+from modeling_bert import BertForSequenceClassification
 
 
 logger = logging.getLogger(__name__)
@@ -236,7 +237,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
     )
-    model = AutoModelForSequenceClassification.from_pretrained(
+    model = BertForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
     )
 

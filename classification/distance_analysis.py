@@ -640,7 +640,7 @@ def main():
                     metric_suite.compute_accum(outputs.hidden_states)
                 else: 
                     metric_suite.compute_accum(outputs.hidden_states, student_outputs.hidden_states)
-                metric_suite.savefigs() 
+            metric_suite.savefigs() 
             
 
 

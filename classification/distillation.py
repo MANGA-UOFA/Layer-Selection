@@ -56,6 +56,7 @@ task_to_keys = {
 }
 
 from trainer import DistillBertTrainer
+from modeling_bert import BertForSequenceClassification
 
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,14 @@ class Writer(object):
     def close(self): 
         self.file.flush() 
         self.file.close()
+
+
+# import debugpy 
+
+# # Optional: block program execution until a client attaches
+# print("Waiting for debugger attach...")
+# debugpy.wait_for_client()
+# print("Debugger Attached!")
 
 
 
@@ -190,8 +199,13 @@ class DistillationArguments(TrainingArguments):
         metadata={"help": "MLE objective balancer"})
 
     alpha_hidden: Optional[float] = field(
-        default=1., 
+        default=3., 
         metadata={"help": "Hidden loss balancer"})
+    
+    alpha_dv: Optional[float] = field(
+        default=0., 
+        metadata={"help": "Donsker-Varadhan loss balancer"}
+    )
     
     reverse: Optional[bool] = field(
         default=False, 
@@ -373,7 +387,7 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    model = AutoModelForSequenceClassification.from_pretrained(
+    model = BertForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List
 import plotly.express as px
 import matplotlib.pyplot as plt
+import numpy as np
 
 import torch
 import pandas as pd
@@ -24,7 +25,7 @@ from modeling_t5 import T5ForConditionalGeneration
 from utils import calculate_test_bleu, calculate_rouge, chunks, parse_numeric_n_bool_cl_kwargs, use_task_specific_params
 
 
-from dist_utils import compute_pca, pca_transform, create_display_df, DistBetweenModels, DistBetweenLayers, DistPairwise
+from dist_utils import compute_pca, pca_transform, create_display_df, DistBetweenModels, DistBetweenLayers, DistPairwise, CosineFromStudent
 
 
 logger = getLogger(__name__)
@@ -51,177 +52,206 @@ LAYER_MAP = {
 
 
 class MetricsSuite: 
-    def __init__(self, config1, config2 = None, reverse_encoder=False, reverse_decoder=False): 
-        self.dist_between_decoders = DistBetweenModels()
-        self.dist_between_encoders = DistBetweenModels()
-        self.dist_teacher_teacher_enc = DistPairwise()
-        self.dist_teacher_teacher_dec = DistPairwise()
-        self.dist_teacher_student_enc = DistPairwise()
-        self.dist_teacher_student_dec = DistPairwise()
-        self.dist_student_student_enc = DistPairwise()
-        self.dist_student_student_dec = DistPairwise()
-        self.dist_between_teacher_enc = DistBetweenLayers()
-        self.dist_between_teacher_dec = DistBetweenLayers()
-        self.dist_between_student_enc = DistBetweenLayers()
-        self.dist_between_student_dec = DistBetweenLayers()
+    def __init__(self, config1, config2 = None, reverse_encoder=False, reverse_decoder=False, save_dir="runs/"): 
+        # self.dist_between_decoders = DistBetweenModels()
+        # self.dist_between_encoders = DistBetweenModels()
+        # self.dist_teacher_teacher_enc = DistPairwise()
+        # self.dist_teacher_teacher_dec = DistPairwise()
+        # self.dist_teacher_student_enc = DistPairwise()
+        # self.dist_teacher_student_dec = DistPairwise()
+        # self.dist_student_student_enc = DistPairwise()
+        # self.dist_student_student_dec = DistPairwise()
+        # self.dist_between_teacher_enc = DistBetweenLayers()
+        # self.dist_between_teacher_dec = DistBetweenLayers()
+        # self.dist_between_student_enc = DistBetweenLayers()
+        # self.dist_between_student_dec = DistBetweenLayers()
+
+        self.cosine_from_student_enc = CosineFromStudent(None)
+        self.cosine_from_student_dec = CosineFromStudent(None)
+
         self.config1 = config1 
         self.config2 = config2
         self.reverse_enc = reverse_encoder 
         self.reverse_dec = reverse_decoder
+        self.savedir = save_dir
     def compute_accum(self, enc_hidden_1, dec_hidden_1, enc_hidden_2=None, dec_hidden_2=None): 
         """
         hidden_1: torch.Tensor[batch, num_layers_1, hidden]
         hidden_2: torch.Tensor[batch, num_layers_2, hidden]
         
         """
-        dec_indices = [0] + [i+1 for i in LAYER_MAP[self.config1.num_decoder_layers][self.config2.num_decoder_layers]] if self.config2 is not None else None
-        enc_indices = [0] + [i+1 for i in LAYER_MAP[self.config1.num_layers][self.config2.num_layers]] if self.config2 is not None else None
+        # dec_indices = [0] + [i+1 for i in LAYER_MAP[self.config1.num_decoder_layers][self.config2.num_decoder_layers]] if self.config2 is not None else None
+        # enc_indices = [0] + [i+1 for i in LAYER_MAP[self.config1.num_layers][self.config2.num_layers]] if self.config2 is not None else None
 
-        if self.reverse_enc: 
-            enc_indices = enc_indices[::-1]
-        if self.reverse_dec: 
-            dec_indices = dec_indices[::-1]
+        # if self.reverse_enc: 
+        #     enc_indices = enc_indices[::-1]
+        # if self.reverse_dec: 
+        #     dec_indices = dec_indices[::-1]
         
-        self.enc_indices = enc_indices 
-        self.dec_indices = dec_indices
+        # self.enc_indices = enc_indices 
+        # self.dec_indices = dec_indices
 
-        self.dist_teacher_teacher_enc(enc_hidden_1, enc_hidden_1).accum()
-        self.dist_teacher_teacher_dec(dec_hidden_1, dec_hidden_1).accum()
-        self.dist_between_teacher_enc(enc_hidden_1).accum()
-        self.dist_between_teacher_dec(dec_hidden_1).accum()
+        # self.dist_teacher_teacher_enc(enc_hidden_1, enc_hidden_1).accum()
+        # self.dist_teacher_teacher_dec(dec_hidden_1, dec_hidden_1).accum()
+        # self.dist_between_teacher_enc(enc_hidden_1).accum()
+        # self.dist_between_teacher_dec(dec_hidden_1).accum()
 
         if self.config2 is not None:
-            self.dist_between_encoders(enc_hidden_1[:, enc_indices], enc_hidden_2).accum()
-            self.dist_between_decoders(dec_hidden_1[:, dec_indices], dec_hidden_2).accum()
-            self.dist_student_student_enc(enc_hidden_2, enc_hidden_2).accum()
-            self.dist_student_student_dec(dec_hidden_2, dec_hidden_2).accum()
-            self.dist_teacher_student_enc(enc_hidden_1, enc_hidden_2).accum()
-            self.dist_teacher_student_dec(dec_hidden_1, dec_hidden_2).accum()
-            self.dist_between_student_enc(enc_hidden_2).accum()
-            self.dist_between_student_dec(dec_hidden_2).accum()
+            # self.dist_between_encoders(enc_hidden_1[:, enc_indices], enc_hidden_2).accum()
+            # self.dist_between_decoders(dec_hidden_1[:, dec_indices], dec_hidden_2).accum()
+            # self.dist_student_student_enc(enc_hidden_2, enc_hidden_2).accum()
+            # self.dist_student_student_dec(dec_hidden_2, dec_hidden_2).accum()
+            # self.dist_teacher_student_enc(enc_hidden_1, enc_hidden_2).accum()
+            # self.dist_teacher_student_dec(dec_hidden_1, dec_hidden_2).accum()
+            # self.dist_between_student_enc(enc_hidden_2).accum()
+            # self.dist_between_student_dec(dec_hidden_2).accum()
+            self.cosine_from_student_enc(enc_hidden_1, enc_hidden_2).accum()
+            self.cosine_from_student_dec(dec_hidden_1, dec_hidden_2).accum()
 
     def save_figs(self, dirname): 
-        teacher_teacher_enc = self.dist_teacher_teacher_enc.get_mean()
-        teacher_teacher_dec = self.dist_teacher_teacher_dec.get_mean()
-        fig, ax = plt.subplots(ncols=2, figsize=(10, 4), gridspec_kw={'wspace': 0.5})
-        im1 = ax[0].imshow(teacher_teacher_enc)
-        im2 = ax[1].imshow(teacher_teacher_dec)
-        ax[0].set_title("Encoder")
-        ax[0].set_xlabel("Teacher Layer j")
-        ax[0].set_ylabel("Teacher Layer i")
-        ax[1].set_title("Decoder")
-        ax[1].set_xlabel("Teacher Layer j")
-        ax[1].set_ylabel("Teacher Layer i")
+        # teacher_teacher_enc = self.dist_teacher_teacher_enc.get_mean()
+        # teacher_teacher_dec = self.dist_teacher_teacher_dec.get_mean()
+        # fig, ax = plt.subplots(ncols=2, figsize=(10, 4), gridspec_kw={'wspace': 0.5})
+        # im1 = ax[0].imshow(teacher_teacher_enc)
+        # im2 = ax[1].imshow(teacher_teacher_dec)
+        # ax[0].set_title("Encoder")
+        # ax[0].set_xlabel("Teacher Layer j")
+        # ax[0].set_ylabel("Teacher Layer i")
+        # ax[1].set_title("Decoder")
+        # ax[1].set_xlabel("Teacher Layer j")
+        # ax[1].set_ylabel("Teacher Layer i")
 
-        fig.colorbar(im1, ax=ax[0])
-        fig.colorbar(im2, ax=ax[1])
+        # fig.colorbar(im1, ax=ax[0])
+        # fig.colorbar(im2, ax=ax[1])
 
-        plt.savefig(os.path.join(dirname, "teacher-teacher-pairwise-dist"))
-        plt.close()
+        # plt.savefig(os.path.join(dirname, "teacher-teacher-pairwise-dist"))
+        # plt.close()
 
-        teacher_between_enc_dist = self.dist_between_teacher_enc.get_mean() 
-        teacher_between_dec_dist = self.dist_between_teacher_dec.get_mean() 
-        fig, ax = plt.subplots(ncols=2, figsize=(10, 4), gridspec_kw={'wspace': 0.5})
-        x_enc = torch.arange(self.config1.num_layers)
-        x_dec = torch.arange(self.config1.num_decoder_layers)
-        width = 0.35 
-        shift = width/ 2 if self.config2 is not None else 0
-        im1 = ax[0].bar(x_enc + 1 - shift, teacher_between_enc_dist, width, label="Teacher")
-        im2 = ax[1].bar(x_dec + 1 - shift, teacher_between_dec_dist, width, label="Teacher")
-        ax[0].set_title("Encoder")
-        ax[0].set_xlabel("Layers")
-        ax[0].set_ylabel("L2 Norm")
-        ax[1].set_title("Decoder")
-        ax[1].set_xlabel("Layers")
-        ax[1].set_ylabel("L2 Norm")
+        # teacher_between_enc_dist = self.dist_between_teacher_enc.get_mean() 
+        # teacher_between_dec_dist = self.dist_between_teacher_dec.get_mean() 
+        # fig, ax = plt.subplots(ncols=2, figsize=(10, 4), gridspec_kw={'wspace': 0.5})
+        # x_enc = torch.arange(self.config1.num_layers)
+        # x_dec = torch.arange(self.config1.num_decoder_layers)
+        # width = 0.35 
+        # shift = width/ 2 if self.config2 is not None else 0
+        # im1 = ax[0].bar(x_enc + 1 - shift, teacher_between_enc_dist, width, label="Teacher")
+        # im2 = ax[1].bar(x_dec + 1 - shift, teacher_between_dec_dist, width, label="Teacher")
+        # ax[0].set_title("Encoder")
+        # ax[0].set_xlabel("Layers")
+        # ax[0].set_ylabel("L2 Norm")
+        # ax[1].set_title("Decoder")
+        # ax[1].set_xlabel("Layers")
+        # ax[1].set_ylabel("L2 Norm")
 
         if self.config2 is not None: 
-            student_between_enc_dist = self.dist_between_student_enc.get_mean()
-            student_between_dec_dist = self.dist_between_student_dec.get_mean()
-            ax[0].bar(torch.tensor([i+1 for i in LAYER_MAP[self.config1.num_layers][self.config2.num_layers]]) + shift, student_between_enc_dist, width, label= "Student") 
-            ax[1].bar(torch.tensor([i+1 for i in LAYER_MAP[self.config1.num_decoder_layers][self.config2.num_decoder_layers]]) + shift, student_between_dec_dist, width, label= "Student") 
-            plt.savefig(os.path.join(dirname, "between-layer-distances"))
-            plt.close()
+            # student_between_enc_dist = self.dist_between_student_enc.get_mean()
+            # student_between_dec_dist = self.dist_between_student_dec.get_mean()
+            # ax[0].bar(torch.tensor([i+1 for i in LAYER_MAP[self.config1.num_layers][self.config2.num_layers]]) + shift, student_between_enc_dist, width, label= "Student") 
+            # ax[1].bar(torch.tensor([i+1 for i in LAYER_MAP[self.config1.num_decoder_layers][self.config2.num_decoder_layers]]) + shift, student_between_dec_dist, width, label= "Student") 
+            # plt.savefig(os.path.join(dirname, "between-layer-distances"))
+            # plt.close()
             
 
-            teacher_student_encoder_dist = self.dist_between_encoders.get_mean() 
-            teacher_student_decoder_dist = self.dist_between_decoders.get_mean()
+            # teacher_student_encoder_dist = self.dist_between_encoders.get_mean() 
+            # teacher_student_decoder_dist = self.dist_between_decoders.get_mean()
 
-            x = torch.arange(max(len(teacher_student_encoder_dist), len(teacher_student_decoder_dist)))
-            width = 0.35
-            fig, ax = plt.subplots(ncols=2, figsize=(10, 4)) 
-            ax[0].set_title("Encoder matching distances")
-            ax[0].set_ylabel("L2 norm")
-            ax[0].set_xlabel("Teacher layer matched to student")
-            ax[0].bar(x , teacher_student_encoder_dist, width, label="Encoder") 
-            ax[0].set_xticks(x)
-            ax[0].set_xticklabels(self.enc_indices)
+            # x = torch.arange(max(len(teacher_student_encoder_dist), len(teacher_student_decoder_dist)))
+            # width = 0.35
+            # fig, ax = plt.subplots(ncols=2, figsize=(10, 4)) 
+            # ax[0].set_title("Encoder matching distances")
+            # ax[0].set_ylabel("L2 norm")
+            # ax[0].set_xlabel("Teacher layer matched to student")
+            # ax[0].bar(x , teacher_student_encoder_dist, width, label="Encoder") 
+            # ax[0].set_xticks(x)
+            # ax[0].set_xticklabels(self.enc_indices)
 
-            ax[1].set_title("Decoder matching distances")
-            ax[1].set_ylabel("L2 norm")
-            ax[1].set_xlabel("Teacher layer matched to student")
-            ax[1].bar(x , teacher_student_decoder_dist, width, label="Decoder") 
-            ax[1].set_xticks(x)
-            ax[1].set_xticklabels(self.dec_indices)
+            # ax[1].set_title("Decoder matching distances")
+            # ax[1].set_ylabel("L2 norm")
+            # ax[1].set_xlabel("Teacher layer matched to student")
+            # ax[1].bar(x , teacher_student_decoder_dist, width, label="Decoder") 
+            # ax[1].set_xticks(x)
+            # ax[1].set_xticklabels(self.dec_indices)
 
             
-            plt.savefig(os.path.join(dirname, "teacher-student-matching-dist"))
+            # plt.savefig(os.path.join(dirname, "teacher-student-matching-dist"))
+            # plt.close() 
+
+
+            # teacher_student_enc = self.dist_teacher_student_enc.get_mean()
+            # teacher_student_dec = self.dist_teacher_student_dec.get_mean()
+            # fig, ax = plt.subplots(ncols=2, figsize=(10, 4), gridspec_kw={'wspace': 0.5})
+            # im1 = ax[0].imshow(teacher_student_enc)
+            # im2 = ax[1].imshow(teacher_student_dec)
+            # ax[0].set_title("Encoder")
+            # ax[0].set_xlabel("Student Layer j")
+            # ax[0].set_ylabel("Teacher Layer i")
+            # ax[1].set_title("Decoder")
+            # ax[1].set_xlabel("Student Layer j")
+            # ax[1].set_ylabel("Teacher Layer i")
+
+            # fig.colorbar(im1, ax=ax[0])
+            # fig.colorbar(im2, ax=ax[1])
+
+            # plt.savefig(os.path.join(dirname, "teacher-student-pairwise-dist"))
+            # plt.close()
+
+            # student_student_enc = self.dist_student_student_enc.get_mean()
+            # student_student_dec = self.dist_student_student_dec.get_mean()
+            # fig, ax = plt.subplots(ncols=2, figsize=(10, 4), gridspec_kw={'wspace': 0.5})
+            # im1 = ax[0].imshow(student_student_enc)
+            # im2 = ax[1].imshow(student_student_dec)
+            # ax[0].set_title("Encoder")
+            # ax[0].set_xlabel("Student Layer j")
+            # ax[0].set_ylabel("Student Layer i")
+            # ax[1].set_title("Decoder")
+            # ax[1].set_xlabel("Student Layer j")
+            # ax[1].set_ylabel("Student Layer i")
+
+            # fig.colorbar(im1, ax=ax[0])
+            # fig.colorbar(im2, ax=ax[1])
+
+            # plt.savefig(os.path.join(dirname, "student-student-pairwise-dist"))
+            # plt.close()
+
+
+
+            cosines_from_student_enc = self.cosine_from_student_enc.get_mean()
+            plt.hist(cosines_from_student_enc, bins=1000, range=(-1., 1.))
+            plt.savefig(os.path.join(self.savedir, "student_directions_hist_enc"))
             plt.close() 
 
+            cosines_from_student_dec = self.cosine_from_student_dec.get_mean()
+            plt.hist(cosines_from_student_dec, bins=1000, range=(-1., 1.))
+            plt.savefig(os.path.join(self.savedir, "student_directions_hist_dec"))
+            plt.close() 
 
-            teacher_student_enc = self.dist_teacher_student_enc.get_mean()
-            teacher_student_dec = self.dist_teacher_student_dec.get_mean()
-            fig, ax = plt.subplots(ncols=2, figsize=(10, 4), gridspec_kw={'wspace': 0.5})
-            im1 = ax[0].imshow(teacher_student_enc)
-            im2 = ax[1].imshow(teacher_student_dec)
-            ax[0].set_title("Encoder")
-            ax[0].set_xlabel("Student Layer j")
-            ax[0].set_ylabel("Teacher Layer i")
-            ax[1].set_title("Decoder")
-            ax[1].set_xlabel("Student Layer j")
-            ax[1].set_ylabel("Teacher Layer i")
+            hist_enc, bins = np.histogram(cosines_from_student_enc, bins=1000, range=(-1, 1))
+            hist_dec, bins = np.histogram(cosines_from_student_dec, bins=1000, range=(-1, 1))
 
-            fig.colorbar(im1, ax=ax[0])
-            fig.colorbar(im2, ax=ax[1])
+            pd.DataFrame(np.stack((bins[:hist_enc.shape[0]], hist_enc ), axis=1)).to_csv(os.path.join(self.savedir, 'cosines_enc.csv'), index=False)
+            pd.DataFrame(np.stack((bins[:hist_dec.shape[0]], hist_dec), axis=1)).to_csv(os.path.join(self.savedir, 'cosines_dec.csv'), index=False)
+            
 
-            plt.savefig(os.path.join(dirname, "teacher-student-pairwise-dist"))
-            plt.close()
 
-            student_student_enc = self.dist_student_student_enc.get_mean()
-            student_student_dec = self.dist_student_student_dec.get_mean()
-            fig, ax = plt.subplots(ncols=2, figsize=(10, 4), gridspec_kw={'wspace': 0.5})
-            im1 = ax[0].imshow(student_student_enc)
-            im2 = ax[1].imshow(student_student_dec)
-            ax[0].set_title("Encoder")
-            ax[0].set_xlabel("Student Layer j")
-            ax[0].set_ylabel("Student Layer i")
-            ax[1].set_title("Decoder")
-            ax[1].set_xlabel("Student Layer j")
-            ax[1].set_ylabel("Student Layer i")
 
-            fig.colorbar(im1, ax=ax[0])
-            fig.colorbar(im2, ax=ax[1])
 
-            plt.savefig(os.path.join(dirname, "student-student-pairwise-dist"))
-            plt.close()
-
-            # compute the average distance between each student layer and all teacher layers
-            student_teacher_avg_dist_per_layer_enc = teacher_student_enc.mean(dim=0) # torch.Tensor[num_student_layers]
-            student_teacher_avg_dist_enc = student_teacher_avg_dist_per_layer_enc.mean()
-            student_teacher_avg_dist_per_layer_dec = teacher_student_dec.mean(dim=0) # torch.Tensor[num_student_layers]
-            student_teacher_avg_dist_dec = student_teacher_avg_dist_per_layer_dec.mean()
-            teacher_avg_enc_dist = teacher_between_enc_dist.mean()
-            teacher_avg_dec_dist = teacher_between_dec_dist.mean()
-            with open(os.path.join(dirname, "teacher-student-stats.tsv"), "w") as f:
-                f.write(f"student_teacher_dist_per_layer_enc\t{student_teacher_avg_dist_per_layer_enc.tolist()}\n")
-                f.write(f"student_teacher_avg_dist_enc\t{student_teacher_avg_dist_enc.item()}\n")
-                f.write(f"student_teacher_dist_per_layer_dec\t{student_teacher_avg_dist_per_layer_dec.tolist()}\n")
-                f.write(f"student_teacher_avg_dist_dec\t{student_teacher_avg_dist_dec.item()}\n")
-                f.write(f"teacher_between_enc_dist\t{teacher_between_enc_dist.tolist()}\n")
-                f.write(f"teacher_avg_between_enc_dist\t{teacher_avg_enc_dist.item()}\n")
-                f.write(f"teacher_between_dec_dist\t{teacher_between_dec_dist.tolist()}\n")
-                f.write(f"teacher_avg_between_dec_dist\t{teacher_avg_dec_dist.item()}\n")
-                f.write(f"||teacher - student|| / ||teacher_encoder_between_layer||\t{(student_teacher_avg_dist_enc / teacher_avg_enc_dist).item()}\n")
+            # # compute the average distance between each student layer and all teacher layers
+            # student_teacher_avg_dist_per_layer_enc = teacher_student_enc.mean(dim=0) # torch.Tensor[num_student_layers]
+            # student_teacher_avg_dist_enc = student_teacher_avg_dist_per_layer_enc.mean()
+            # student_teacher_avg_dist_per_layer_dec = teacher_student_dec.mean(dim=0) # torch.Tensor[num_student_layers]
+            # student_teacher_avg_dist_dec = student_teacher_avg_dist_per_layer_dec.mean()
+            # teacher_avg_enc_dist = teacher_between_enc_dist.mean()
+            # teacher_avg_dec_dist = teacher_between_dec_dist.mean()
+            # with open(os.path.join(dirname, "teacher-student-stats.tsv"), "w") as f:
+            #     f.write(f"student_teacher_dist_per_layer_enc\t{student_teacher_avg_dist_per_layer_enc.tolist()}\n")
+            #     f.write(f"student_teacher_avg_dist_enc\t{student_teacher_avg_dist_enc.item()}\n")
+            #     f.write(f"student_teacher_dist_per_layer_dec\t{student_teacher_avg_dist_per_layer_dec.tolist()}\n")
+            #     f.write(f"student_teacher_avg_dist_dec\t{student_teacher_avg_dist_dec.item()}\n")
+            #     f.write(f"teacher_between_enc_dist\t{teacher_between_enc_dist.tolist()}\n")
+            #     f.write(f"teacher_avg_between_enc_dist\t{teacher_avg_enc_dist.item()}\n")
+            #     f.write(f"teacher_between_dec_dist\t{teacher_between_dec_dist.tolist()}\n")
+            #     f.write(f"teacher_avg_between_dec_dist\t{teacher_avg_dec_dist.item()}\n")
+            #     f.write(f"||teacher - student|| / ||teacher_encoder_between_layer||\t{(student_teacher_avg_dist_enc / teacher_avg_enc_dist).item()}\n")
 
 
 
@@ -283,101 +313,112 @@ def generate_summaries_or_translations(
     dist_student_student_dec = DistPairwise()
 
     if compare_model is None: 
-        metrics = MetricsSuite(model.config, reverse_encoder=reverse_encoder, reverse_decoder=reverse_decoder)
+        metrics = MetricsSuite(model.config, reverse_encoder=reverse_encoder, reverse_decoder=reverse_decoder, save_dir="/".join(out_file.split("/")[:-1]))
     else: 
-        metrics = MetricsSuite(model.config, compare_model.config, reverse_encoder=reverse_encoder, reverse_decoder=reverse_decoder)
+        metrics = MetricsSuite(model.config, compare_model.config, reverse_encoder=reverse_encoder, reverse_decoder=reverse_decoder,  save_dir="/".join(out_file.split("/")[:-1]))
 
 
     for examples_chunk in tqdm(list(chunks([list(a) for a in zip(examples, references)], batch_size))):
         input_chunk = ["t" + text[0][1:] for text in examples_chunk]
         decoder_chunk = [text[1] for text in examples_chunk]
-        batch = tokenizer(input_chunk, max_length=max_length, return_tensors="pt", truncation=True, padding="longest").to(device)
-        decoder_inputs = tokenizer(decoder_chunk, max_length=max_length, return_tensors="pt", truncation=True, padding="longest").to(device)
+        batch = tokenizer(input_chunk, return_tensors="pt", truncation=True, padding="longest").to(device)
+        decoder_inputs = tokenizer(decoder_chunk, return_tensors="pt", truncation=True, padding="longest").to(device)
 
 
         # gen_config = GenerationConfig(output_hidden_states=True, **generate_kwargs)
 
         # print(input_chunk)
         # print(decoder_chunk)
-        outputs = model.generate(
-            input_ids=batch.input_ids,
-            num_beams=num_beams,
-            attention_mask=batch.attention_mask,
-            # generation_config=gen_config, 
-            output_hidden_states=True,
-            return_dict_in_generate=True,  
-            output_scores=True, 
-            **generate_kwargs,
-        )
-
-        if compare_model is not None: 
-            compare_outputs =  compare_model.generate(
+        # outputs = model.generate(
+        #     input_ids=batch.input_ids,
+        #     num_beams=num_beams,
+        #     attention_mask=batch.attention_mask,
+        #     # generation_config=gen_config, 
+        #     output_hidden_states=True,
+        #     return_dict_in_generate=True,  
+        #     output_scores=True, 
+        #     **generate_kwargs,
+        # )
+        with torch.no_grad():
+            outputs = model(
                 input_ids=batch.input_ids,
-                num_beams=num_beams,
                 attention_mask=batch.attention_mask,
+                decoder_input_ids=decoder_inputs.input_ids, 
+                decoder_attention_mask=decoder_inputs.attention_mask,
                 # generation_config=gen_config, 
                 output_hidden_states=True,
-                return_dict_in_generate=True,  
-                output_scores=True, 
-                **generate_kwargs,
-            ) 
-        else:
-            compare_outputs = None
+                return_dict=True, 
+            )
+
+            if compare_model is not None: 
+                compare_outputs =  compare_model(
+                    input_ids=batch.input_ids,
+                    attention_mask=batch.attention_mask,
+                    decoder_input_ids=decoder_inputs.input_ids, 
+                    decoder_attention_mask=decoder_inputs.attention_mask,
+                    # generation_config=gen_config, 
+                    output_hidden_states=True,
+                    return_dict=True, 
+                ) 
+            else:
+                compare_outputs = None
 
         if unnormalized: 
             break
         
         #computing the encoder hidden states
-        encoder_hidden.append(torch.stack([(e.sum(dim=1)/batch.attention_mask.sum(dim=1, keepdims=True)).detach().cpu() for e in outputs.encoder_hidden_states], dim=1))
-        #computing the decoder hidden states is a bit weird, since its tokenwise via autoregressive generation
-        timesteps = []
-        for tokens in outputs.decoder_hidden_states: 
-            layers = []
-            for layer in tokens: 
-                # This is [batch_size, 1, hidden]
-                hidden_state_normed = torch.cat([layer[i*num_beams:(i+1)*num_beams].mean(dim=0, keepdims=True).detach().cpu() for i in range(math.floor(layer.shape[0]/num_beams))], dim=0)
-                layers.append(hidden_state_normed)
-            # [batch_size, layers, hidden]
-            layers = torch.cat(layers, dim=1)
-            timesteps.append(layers)
-        #
-        decoder_hidden_T = torch.stack(timesteps, dim=2)
-        decoder_hidden_T = decoder_hidden_T.mean(dim=2)
-        decoder_hidden.append(decoder_hidden_T)
+        # encoder_hidden.append(torch.stack([(e.sum(dim=1)/batch.attention_mask.sum(dim=1, keepdims=True)).detach().cpu() for e in outputs.encoder_hidden_states], dim=1))
+        # #computing the decoder hidden states is a bit weird, since its tokenwise via autoregressive generation
+        # timesteps = []
+        # for tokens in outputs.decoder_hidden_states: 
+        #     layers = []
+        #     for layer in tokens: 
+        #         # This is [batch_size, 1, hidden]
+        #         hidden_state_normed = torch.cat([layer[i*num_beams:(i+1)*num_beams].mean(dim=0, keepdims=True).detach().cpu() for i in range(math.floor(layer.shape[0]/num_beams))], dim=0)
+        #         layers.append(hidden_state_normed)
+        #     # [batch_size, layers, hidden]
+        #     layers = torch.cat(layers, dim=1)
+        #     timesteps.append(layers)
+        # #
+        # decoder_hidden_T = torch.stack(timesteps, dim=2)
+        # decoder_hidden_T = decoder_hidden_T.mean(dim=2)
+        # decoder_hidden.append(decoder_hidden_T)
 
         if compare_model is not None: 
             # copy-paste of above code for student
-            compare_encoder_hidden.append(torch.stack([(e.sum(dim=1)/batch.attention_mask.sum(dim=1, keepdims=True)).detach().cpu() for e in compare_outputs.encoder_hidden_states], dim=1))
+            # compare_encoder_hidden.append(torch.stack([(e.sum(dim=1)/batch.attention_mask.sum(dim=1, keepdims=True)).detach().cpu() for e in compare_outputs.encoder_hidden_states], dim=1))
 
-            timesteps = []
-            for tokens in compare_outputs.decoder_hidden_states: 
-                layers = []
-                for layer in tokens: 
-                    # This is [batch_size, 1, hidden]
-                    hidden_state_normed = torch.cat([layer[i*num_beams:(i+1)*num_beams].mean(dim=0, keepdims=True).detach().cpu() for i in range(math.floor(layer.shape[0]/num_beams))], dim=0)
-                    layers.append(hidden_state_normed)
-                # [batch_size, layers, hidden]
-                layers = torch.cat(layers, dim=1)
-                timesteps.append(layers)
-            #
-            decoder_hidden_S = torch.stack(timesteps, dim=2)
-            decoder_hidden_S = decoder_hidden_S.mean(dim=2)
-            compare_decoder_hidden.append(decoder_hidden_S)
+            # timesteps = []
+            # for tokens in compare_outputs.decoder_hidden_states: 
+            #     layers = []
+            #     for layer in tokens: 
+            #         # This is [batch_size, 1, hidden]
+            #         hidden_state_normed = torch.cat([layer[i*num_beams:(i+1)*num_beams].mean(dim=0, keepdims=True).detach().cpu() for i in range(math.floor(layer.shape[0]/num_beams))], dim=0)
+            #         layers.append(hidden_state_normed)
+            #     # [batch_size, layers, hidden]
+            #     layers = torch.cat(layers, dim=1)
+            #     timesteps.append(layers)
+            # #
+            # decoder_hidden_S = torch.stack(timesteps, dim=2)
+            # decoder_hidden_S = decoder_hidden_S.mean(dim=2)
+            # compare_decoder_hidden.append(decoder_hidden_S)
 
-            metrics.compute_accum(encoder_hidden[-1], decoder_hidden[-1], compare_encoder_hidden[-1], compare_decoder_hidden[-1])
+            # metrics.compute_accum(encoder_hidden[-1], decoder_hidden[-1], compare_encoder_hidden[-1], compare_decoder_hidden[-1])
+            metrics.compute_accum(torch.stack(outputs.encoder_hidden_states, dim=1), torch.stack(outputs.decoder_hidden_states, dim=1), torch.stack(compare_outputs.encoder_hidden_states, dim=1), torch.stack(compare_outputs.decoder_hidden_states, dim=1))
             metrics.save_figs("/".join(out_file.split("/")[:-1]))
         else: 
-            metrics.compute_accum(encoder_hidden[-1], decoder_hidden[-1]) 
-            metrics.save_figs("/".join(out_file.split("/")[:-1]))
+            # metrics.compute_accum(encoder_hidden[-1], decoder_hidden[-1]) 
+            # metrics.compute_accum(outputs.encoder_hidden_states, outputs.decoder_hidden_states, compare_outputs.encoder_hidden_states, compare_outputs.decoder_hidden_states)
+            # metrics.save_figs("/".join(out_file.split("/")[:-1]))
+            pass
 
 
 
 
-
-        dec = tokenizer.batch_decode(outputs.sequences, skip_special_tokens=True, clean_up_tokenization_spaces=False)
-        for hypothesis in dec:
-            fout.write(hypothesis + "\n")
-            fout.flush()
+        # dec = tokenizer.batch_decode(outputs.sequences, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+        # for hypothesis in dec:
+        #     fout.write(hypothesis + "\n")
+        #     fout.flush()
 
     # encoder_hidden = [e.mean(dim=0, keepdims=True) for e in encoder_hidden]
     # decoder_hidden = [d.mean(dim=0, keepdims=True) for d in decoder_hidden]
